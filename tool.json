@@ -1,0 +1,32 @@
+{
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "plan_least_story",
+        "description": "Extrae la historia con menor esfuerzo desde Jira y genera un prompt con el código del repo.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "jira_url": { "type": "string" },
+            "jira_user": { "type": "string" },
+            "jira_token": { "type": "string" },
+            "jira_board_id": { "type": "string" },
+            "github_token": { "type": "string" },
+            "owner": { "type": "string" },
+            "repo_name": { "type": "string" }
+          },
+          "required": [
+            "jira_url",
+            "jira_user",
+            "jira_token",
+            "jira_board_id",
+            "github_token",
+            "owner",
+            "repo_name"
+          ]
+        }
+      }
+    }
+  ]
+}

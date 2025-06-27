@@ -1,0 +1,45 @@
+Aquí está el diff para implementar el endpoint DELETE /items/{item_id}:
+
+```diff
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -1,6 +1,6 @@
+ from flask import Flask, render_template_string, request, send_file, jsonify
+ import requests
+ from bs4 import BeautifulSoup
+ import pandas as pd
+ import time
+ import logging
+@@ -350,6 +350,19 @@
+     history_list = [{'date': date, 'avg_price': sum(prices)//len(prices)} for date, prices in sorted(history_points.items())]
+     return jsonify({'history': history_list})
+ 
++@app.route('/items/<item_id>', methods=['DELETE'])
++def delete_item(item_id):
++    try:
++        result = cars_collection.delete_one({'unique_id': item_id})
++        if result.deleted_count == 1:
++            return jsonify({'status': 'success', 'message': f'Item {item_id} deleted'}), 200
++        else:
++            return jsonify({'status': 'error', 'message': 'Item not found'}), 404
++    except Exception as e:
++        logger.error(f"Error deleting item {item_id}: {str(e)}")
++        return jsonify({'status': 'error', 'message': str(e)}), 500
++
++
+ @app.route('/download/<filename>')
+ def download(filename):
+     return send_file(filename, as_attachment=True)
+```
+
+Este diff:
+1. Añade un nuevo endpoint DELETE /items/{item_id}
+2. Implementa la lógica para eliminar un ítem de la colección MongoDB usando su unique_id
+3. Maneja tres casos:
+   - Éxito al eliminar (200)
+   - Ítem no encontrado (404)
+   - Error del servidor (500)
+4. Registra errores en el logger
+
+El endpoint sigue las mejores prácticas REST y se integra con la estructura existente de la aplicación Flask.

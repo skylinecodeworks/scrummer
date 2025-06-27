@@ -1,0 +1,432 @@
+📁 ESTRUCTURA DEL PROYECTO
+.
+├── bundle.sh
+├── patch
+│   └── TEST1-10.patch
+├── pyproject.toml
+├── README.md
+├── run_chat.py
+├── scrummer.txt
+├── tool.json
+└── tool.py
+
+2 directories, 8 files
+
+
+🧠 CONTENIDO RELEVANTE
+
+### ./pyproject.toml ###
+[project]
+name = "scrummer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+
+
+### ./README.md ###
+
+
+
+### ./tool.py ###
+import os
+import tempfile
+import shutil
+import logging
+from jira import JIRA
+from dotenv import load_dotenv
+from git import Repo
+
+load_dotenv()
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger(__name__)
+
+def plan_least_story(
+    jira_url: str,
+    jira_user: str,
+    jira_token: str,
+    jira_board_id: str,
+    github_token: str,
+    owner: str,
+    repo_name: str
+) -> dict:
+    """
+    Recupera la story con menor esfuerzo del sprint activo y construye
+    el prompt que Ollama usará para generar un patch unificado.
+
+    Args:
+      jira_url: URL de la instancia de Jira.
+      jira_user: Usuario de Jira.
+      jira_token: Token o contraseña de Jira.
+      jira_board_id: ID del board de Jira.
+      github_token: Token de acceso a GitHub.
+      story_points_field: Nombre del campo de Story Points en Jira.
+      owner: Propietario de GitHub.
+      repo_name: Nombre del repositorio.
+
+    Returns:
+      Un dict con claves: story_key, story_summary, story_points, prompt.
+    """
+    logger.info("=== plan_least_story iniciado para %s/%s ===", owner, repo_name)
+
+    # 1. Inicializar cliente Jira
+    try:
+        jira = JIRA(server=jira_url, basic_auth=(jira_user, jira_token))
+        logger.info("Cliente Jira inicializado: %s", jira_url)
+    except Exception as e:
+        logger.exception("Error al inicializar cliente Jira")
+        return {"error": f"Falló inicialización Jira: {e}"}
+
+    # 3. Obtener stories y seleccionar la de menor esfuerzo
+    jql = f"project = {jira_board_id}"
+    logger.info("Ejecutando JQL: %s", jql)
+    try:
+        issues = jira.search_issues(jql, maxResults=100)
+    except Exception as e:
+        logger.exception("Error buscando issues en Jira")
+        return {"error": f"Falló búsqueda de issues: {e}"}
+
+    if not issues:
+        return {"error": "No se encontraron stories"}
+    least = issues[0]
+    print(f"Story: {least}")
+    story_key = least.key
+    story_summary = least.fields.summary
+    logger.info("Story seleccionada: %s - %s", story_key, story_summary)
+
+    # 4. Clonar el repositorio a un directorio temporal
+    temp_dir = tempfile.mkdtemp()
+    repo_url = f"https://{github_token}@github.com/{owner}/{repo_name}.git"
+    logger.info("Clonando repo: %s -> %s", repo_url, temp_dir)
+    try:
+        Repo.clone_from(repo_url, temp_dir)
+        logger.info("Repositorio clonado con éxito")
+    except Exception as e:
+        logger.exception("Error clonando repositorio GitHub")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return {"error": f"Error clonando repo: {e}"}
+
+    # 5. Leer contenido de los ficheros relevantes
+    files_content = {}
+    logger.info("Leyendo archivos en %s", temp_dir)
+    for root, _, files in os.walk(temp_dir):
+        for fname in files:
+            if fname.endswith(('.py', '.ini', '.cfg', '.yaml', '.yml', '.json', '.toml')):
+                rel = os.path.relpath(os.path.join(root, fname), temp_dir)
+                try:
+                    with open(os.path.join(root, fname), 'r', encoding='utf-8') as f:
+                        files_content[rel] = f.read()
+                    logger.debug("Leído archivo: %s (%d chars)", rel, len(files_content[rel]))
+                except Exception as e:
+                    logger.warning("No se pudo leer %s: %s", rel, e)
+                    files_content[rel] = ''
+    logger.info("Total archivos leídos: %d", len(files_content))
+    logger.info("Contenido: %s", files_content)
+
+
+
+
+### ./tool.json ###
+{
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "plan_least_story",
+        "description": "Devuelve un prompt con un diff-u que implementa la historia de menor esfuerzo del sprint activo."
+      }
+    }
+  ]
+}
+
+
+
+### ./.env ###
+# Jira
+JIRA_URL=https://tomaspascualhome.atlassian.net/
+JIRA_USER=tomas.pascual.home@gmail.com
+JIRA_TOKEN=ATATT3xFfGF09O5fNZASTPFUWnVkBr3y9n1boGgyscmPEMOC6XbwUH1LBkuS_Mid_bUSKmOgNkWg1ihmjGXifLZ8LeUHRIwmNnnRJdDKZdPZQMFUb48PYnDAd0DMMrNgSZl1LiDULm3CJ3F9OerflTHeAkDZEOQwZO1r-qGZtf9bqOVHEjd9E7U=43DDF333
+JIRA_BOARD_ID=test1
+JIRA_STORY_POINTS_FIELD=xxxxxxxxxxxxxxxxxxxxxx
+
+# GitHub
+GITHUB_TOKEN=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
+
+# Repositorio por defecto
+OWNER=skylinecodeworks
+REPO=mercadolibre_search
+
+# Puerto de la API
+PORT=8001
+
+
+### ./run_chat.py ###
+# run_chat.py
+import json, os, logging
+from dotenv import load_dotenv
+import ollama
+from tool import plan_least_story   # tu lógica
+load_dotenv()
+
+JIRA_URL              = os.getenv("JIRA_URL")
+JIRA_USER             = os.getenv("JIRA_USER")
+JIRA_TOKEN            = os.getenv("JIRA_TOKEN")
+JIRA_BOARD_ID         = os.getenv("JIRA_BOARD_ID")
+JIRA_STORY_POINTS_FIELD = os.getenv("JIRA_STORY_POINTS_FIELD", "customfield_10002")
+
+GITHUB_TOKEN          = os.getenv("GITHUB_TOKEN")
+
+OWNER         = os.getenv("OWNER")
+REPO          = os.getenv("REPO")
+
+# Requiere que el daemon de Ollama esté corriendo en esta URL
+OLLAMA_HOST           = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger(__name__)
+
+# 1. Cargar tools
+with open("tool.json") as f:
+    tools = json.load(f)["tools"]
+
+# 2. Mensajes iniciales
+messages = [
+    {"role": "system", "content": "Eres un asistente que resuelve tareas de desarrollo usando herramientas."},
+    {"role": "user",   "content": "Necesito el diff para la historia más pequeña del sprint actual, para ello utiliza la tool plan_least_story"}
+]
+
+# 3. Lanzar primera petición al modelo
+response = ollama.chat(model="mistral:7b", messages=messages, tools=tools)
+messages.append(response["message"])        # guarda la respuesta del modelo
+
+# 4. ¿Ha pedido ejecutar la tool?
+tool_calls = response["message"].get("tool_calls", [])
+
+if not tool_calls:
+    log.warning("El modelo no hizo ninguna llamada a tools.")
+    print(response["message"]["content"])
+    exit(0)
+
+for call in tool_calls:
+    if call["function"]["name"] == "plan_least_story":
+        args = call["function"]["arguments"]
+        log.info("Ejecutando plan_least_story con %s", args)
+
+        # rellenamos con credenciales de .env
+        tool_result = plan_least_story(
+            jira_url=os.getenv("JIRA_URL"),
+            jira_user=os.getenv("JIRA_USER"),
+            jira_token=os.getenv("JIRA_TOKEN"),
+            jira_board_id=os.getenv("JIRA_BOARD_ID"),
+            github_token=os.getenv("GITHUB_TOKEN"),
+            owner=os.getenv("OWNER"),
+            repo_name=os.getenv("REPO"),
+        )
+
+        # enviar resultado al modelo como role=tool
+        messages.append({
+            "role": "tool",
+            "tool_call_id": call["function"]["name"],
+            "content": json.dumps(tool_result)
+        })
+
+# 5. Segunda vuelta: el modelo ya tiene la info de la tool
+MAX_RETRIES = 3
+retry = 0
+diff_content = None
+
+while retry < MAX_RETRIES:
+    final = ollama.chat(model="mistral:7b", messages=messages)
+    content = final["message"]["content"]
+
+    if "--- " in content and "+++" in content and "@@ " in content:
+        diff_content = content
+        break
+    else:
+        log.warning("Respuesta no es un diff válido, reintentando...")
+        messages.append({
+            "role": "user",
+            "content": "Por favor, genera un diff unificado que implemente la historia anterior."
+        })
+        retry += 1
+
+if not diff_content:
+    log.error("No se pudo obtener un diff válido después de varios intentos.")
+    exit(1)
+
+# Guardar el diff
+patch_dir = os.path.join(os.getcwd(), "patch")
+os.makedirs(patch_dir, exist_ok=True)
+
+patch_path = os.path.join(patch_dir, f"{tool_result['story_key']}.patch")
+with open(patch_path, "w", encoding="utf-8") as f:
+    f.write(diff_content)
+
+
+
+### ./bundle.sh ###
+#!/bin/bash
+
+# bundle_project.sh
+# Combina la estructura y contenido de un proyecto en un único archivo de texto
+
+# === Configuración por defecto ===
+MAX_LINES=100
+EXTENSIONS="py|md|json|yml|env|toml|txt|html|js|ts|css|sh"
+EXCLUDE_DIRS=".git|node_modules|venv|__pycache__"
+
+# === Uso ===
+if [[ $# -lt 1 ]]; then
+  echo "Uso: $0 <salida.txt> [directorio_a_excluir...]"
+  exit 1
+fi
+
+OUTPUT_FILE="$1"
+shift
+
+# Agregar exclusiones adicionales desde argumentos
+for dir in "$@"; do
+  EXCLUDE_DIRS+="|$dir"
+done
+
+# === Paso 1: Estructura del proyecto ===
+echo "📁 ESTRUCTURA DEL PROYECTO" > "$OUTPUT_FILE"
+tree -I "$EXCLUDE_DIRS" >> "$OUTPUT_FILE"
+
+echo -e "\n\n🧠 CONTENIDO RELEVANTE\n" >> "$OUTPUT_FILE"
+
+# === Paso 2: Recorrer archivos y agregar su contenido ===
+find . -type f | grep -Ev "$EXCLUDE_DIRS" | while read file; do
+  # Extraer extensión del archivo
+  ext="${file##*.}"
+
+  # Verificar si la extensión está permitida
+  if [[ "$file" =~ \.($EXTENSIONS)$ ]]; then
+    echo "### $file ###" >> "$OUTPUT_FILE"
+    head -n $MAX_LINES "$file" >> "$OUTPUT_FILE"
+    echo -e "\n\n" >> "$OUTPUT_FILE"
+  elif [[ "$(basename "$file")" == "requirements.txt" ]]; then
+    echo "### $file ###" >> "$OUTPUT_FILE"
+    echo "(Contenido omitido: dependencias externas)" >> "$OUTPUT_FILE"
+    head -n 5 "$file" >> "$OUTPUT_FILE"
+    echo -e "\n\n" >> "$OUTPUT_FILE"
+  fi
+done
+
+echo "✅ Bundle generado exitosamente en $OUTPUT_FILE"
+
+
+
+
+### ./scrummer.txt ###
+📁 ESTRUCTURA DEL PROYECTO
+.
+├── bundle.sh
+├── patch
+│   └── TEST1-10.patch
+├── pyproject.toml
+├── README.md
+├── run_chat.py
+├── scrummer.txt
+├── tool.json
+└── tool.py
+
+2 directories, 8 files
+
+
+🧠 CONTENIDO RELEVANTE
+
+### ./pyproject.toml ###
+[project]
+name = "scrummer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+
+
+### ./README.md ###
+
+
+
+### ./tool.py ###
+import os
+import tempfile
+import shutil
+import logging
+from jira import JIRA
+from dotenv import load_dotenv
+from git import Repo
+
+load_dotenv()
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger(__name__)
+
+def plan_least_story(
+    jira_url: str,
+    jira_user: str,
+    jira_token: str,
+    jira_board_id: str,
+    github_token: str,
+    owner: str,
+    repo_name: str
+) -> dict:
+    """
+    Recupera la story con menor esfuerzo del sprint activo y construye
+    el prompt que Ollama usará para generar un patch unificado.
+
+    Args:
+      jira_url: URL de la instancia de Jira.
+      jira_user: Usuario de Jira.
+      jira_token: Token o contraseña de Jira.
+      jira_board_id: ID del board de Jira.
+      github_token: Token de acceso a GitHub.
+      story_points_field: Nombre del campo de Story Points en Jira.
+      owner: Propietario de GitHub.
+      repo_name: Nombre del repositorio.
+
+    Returns:
+      Un dict con claves: story_key, story_summary, story_points, prompt.
+    """
+    logger.info("=== plan_least_story iniciado para %s/%s ===", owner, repo_name)
+
+    # 1. Inicializar cliente Jira
+    try:
+        jira = JIRA(server=jira_url, basic_auth=(jira_user, jira_token))
+        logger.info("Cliente Jira inicializado: %s", jira_url)
+    except Exception as e:
+        logger.exception("Error al inicializar cliente Jira")
+        return {"error": f"Falló inicialización Jira: {e}"}
+
+    # 3. Obtener stories y seleccionar la de menor esfuerzo
+    jql = f"project = {jira_board_id}"
+    logger.info("Ejecutando JQL: %s", jql)
+    try:
+        issues = jira.search_issues(jql, maxResults=100)
+    except Exception as e:
+        logger.exception("Error buscando issues en Jira")
+        return {"error": f"Falló búsqueda de issues: {e}"}
+
+    if not issues:
+        return {"error": "No se encontraron stories"}
+    least = issues[0]
+    print(f"Story: {least}")
+
+
+
